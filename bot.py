@@ -48,7 +48,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             API_URL,
             headers={
                 "Authorization": f"Bearer {API_KEY}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "application/json",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Origin": "https://agentrouter.org",
+                "Referer": "https://agentrouter.org/"
             },
             json={
                 "model": "glm-4.6",
@@ -58,10 +63,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             timeout=60
         )
         logger.info(f"API status: {response.status_code}")
-        logger.info(f"API response: {response.text[:500]}")
 
         if response.status_code != 200:
-            await update.message.reply_text(f"خطأ من الـ API: {response.status_code}\n{response.text[:200]}")
+            logger.error(f"API error: {response.text[:300]}")
+            await update.message.reply_text(f"خطأ {response.status_code} من الـ API")
             return
 
         data = response.json()
@@ -70,7 +75,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(reply)
 
     except requests.exceptions.Timeout:
-        logger.error("Request timed out")
         await update.message.reply_text("الـ API بطيء، حاول تاني 🙏")
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
