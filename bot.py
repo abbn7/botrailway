@@ -1,6 +1,5 @@
 import os
 import logging
-import json
 import httpx
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
@@ -13,13 +12,16 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 API_KEY = os.environ.get("API_KEY", "").strip()
-API_URL = "https://agentrouter.org/v1/chat/completions"
+PROXY_URL = os.environ.get("PROXY_URL", "").strip()  # Cloudflare Worker URL
 
 if not TELEGRAM_TOKEN:
     raise ValueError("TELEGRAM_TOKEN is missing!")
 if not API_KEY:
     raise ValueError("API_KEY is missing!")
+if not PROXY_URL:
+    raise ValueError("PROXY_URL is missing!")
 
+API_URL = f"{PROXY_URL}/v1/chat/completions"
 user_histories = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -59,27 +61,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
         logger.info(f"Status: {response.status_code}")
-        logger.info(f"Raw response: {response.text[:500]}")
-
         data = response.json()
 
-        # Handle different response formats
-        if isinstance(data, dict):
-            if "choices" in data:
-                reply = data["choices"][0]["message"]["content"]
-            elif "content" in data:
-                reply = data["content"]
-            elif "message" in data:
-                reply = data["message"]
-            elif "error" in data:
-                reply = f"خطأ من الـ API: {data['error']}"
-            else:
-                reply = str(data)
+        if "choices" in data:
+            reply = data["choices"][0]["message"]["content"]
+            user_histories[user_id].append({"role": "assistant", "content": reply})
+            await update.message.reply_text(reply)
         else:
-            reply = str(data)
-
-        user_histories[user_id].append({"role": "assistant", "content": reply})
-        await update.message.reply_text(reply)
+            logger.error(f"Unexpected response: {data}")
+            await update.message.reply_text(f"خطأ: {str(data)[:200]}")
 
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
