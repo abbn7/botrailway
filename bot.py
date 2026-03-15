@@ -1,7 +1,7 @@
 import os
 import logging
-import asyncio
-from openai import AsyncOpenAI
+import json
+import httpx
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
 
@@ -13,16 +13,12 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 API_KEY = os.environ.get("API_KEY", "").strip()
+API_URL = "https://agentrouter.org/v1/chat/completions"
 
 if not TELEGRAM_TOKEN:
     raise ValueError("TELEGRAM_TOKEN is missing!")
 if not API_KEY:
     raise ValueError("API_KEY is missing!")
-
-client = AsyncOpenAI(
-    api_key=API_KEY,
-    base_url="https://agentrouter.org/v1"
-)
 
 user_histories = {}
 
@@ -42,22 +38,48 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_histories[user_id] = []
 
     user_histories[user_id].append({"role": "user", "content": user_message})
-
     if len(user_histories[user_id]) > 20:
         user_histories[user_id] = user_histories[user_id][-20:]
 
     await update.message.chat.send_action("typing")
 
     try:
-        response = await client.chat.completions.create(
-            model="glm-4.6",
-            messages=user_histories[user_id],
-            max_tokens=1000
-        )
-        reply = response.choices[0].message.content
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(
+                API_URL,
+                headers={
+                    "Authorization": f"Bearer {API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "glm-4.6",
+                    "messages": user_histories[user_id],
+                    "max_tokens": 1000
+                }
+            )
+
+        logger.info(f"Status: {response.status_code}")
+        logger.info(f"Raw response: {response.text[:500]}")
+
+        data = response.json()
+
+        # Handle different response formats
+        if isinstance(data, dict):
+            if "choices" in data:
+                reply = data["choices"][0]["message"]["content"]
+            elif "content" in data:
+                reply = data["content"]
+            elif "message" in data:
+                reply = data["message"]
+            elif "error" in data:
+                reply = f"خطأ من الـ API: {data['error']}"
+            else:
+                reply = str(data)
+        else:
+            reply = str(data)
+
         user_histories[user_id].append({"role": "assistant", "content": reply})
         await update.message.reply_text(reply)
-        logger.info("Success!")
 
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
