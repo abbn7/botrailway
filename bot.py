@@ -1,6 +1,7 @@
 import os
 import logging
-import requests
+import asyncio
+from openai import AsyncOpenAI
 from telegram import Update
 from telegram.ext import ApplicationBuilder, MessageHandler, CommandHandler, filters, ContextTypes
 
@@ -12,12 +13,16 @@ logger = logging.getLogger(__name__)
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN", "").strip()
 API_KEY = os.environ.get("API_KEY", "").strip()
-API_URL = "https://agentrouter.org/v1/chat/completions"
 
 if not TELEGRAM_TOKEN:
     raise ValueError("TELEGRAM_TOKEN is missing!")
 if not API_KEY:
     raise ValueError("API_KEY is missing!")
+
+client = AsyncOpenAI(
+    api_key=API_KEY,
+    base_url="https://agentrouter.org/v1"
+)
 
 user_histories = {}
 
@@ -44,41 +49,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.chat.send_action("typing")
 
     try:
-        response = requests.post(
-            API_URL,
-            headers={
-                "Authorization": f"Bearer {API_KEY}",
-                "Content-Type": "application/json",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Accept": "application/json",
-                "Accept-Language": "en-US,en;q=0.9",
-                "Origin": "https://agentrouter.org",
-                "Referer": "https://agentrouter.org/"
-            },
-            json={
-                "model": "glm-4.6",
-                "messages": user_histories[user_id],
-                "max_tokens": 1000
-            },
-            timeout=60
+        response = await client.chat.completions.create(
+            model="glm-4.6",
+            messages=user_histories[user_id],
+            max_tokens=1000
         )
-        logger.info(f"API status: {response.status_code}")
-
-        if response.status_code != 200:
-            logger.error(f"API error: {response.text[:300]}")
-            await update.message.reply_text(f"خطأ {response.status_code} من الـ API")
-            return
-
-        data = response.json()
-        reply = data["choices"][0]["message"]["content"]
+        reply = response.choices[0].message.content
         user_histories[user_id].append({"role": "assistant", "content": reply})
         await update.message.reply_text(reply)
+        logger.info("Success!")
 
-    except requests.exceptions.Timeout:
-        await update.message.reply_text("الـ API بطيء، حاول تاني 🙏")
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
-        await update.message.reply_text(f"خطأ: {str(e)}")
+        await update.message.reply_text(f"خطأ: {str(e)[:200]}")
 
 app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
 app.add_handler(CommandHandler("start", start))
